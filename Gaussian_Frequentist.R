@@ -95,7 +95,7 @@ Y2 <- Y_df %>%
 # FREQUENTIST GAUSSIAN- Evaluation Criteria
 # called de, power, FDP, AUC
 # ============================================================================
-evaluate_gaussian <- function(results, X, true_de) {
+evaluate_gaussian <- function(results, true_de) {
   # DE call
   #-------------------------------------
   # CI does not include 0 and p-value is significant
@@ -107,21 +107,21 @@ evaluate_gaussian <- function(results, X, true_de) {
   #-------------------------------------
   # in order to get the true DE, we need to compare the test results with the original simulated data that has a call for DE or not
   # de_p is a vector from the simulated data with the calls for DE genes
-  true_de <- true_de <- de_p[results$Gene_id]
-  power <- sum(called_de & true_de == 1) / sum(true_de == 1)
-  # True positives: called_de=TRUE  & true_de=1
+  true_de_vector <- true_de[results$Gene_id]
+  power <- sum(called_de & true_de_vector == 1) / sum(true_de_vector == 1)
+  # True positives: called_de=TRUE  & true_de_vector=1
   # Divide true positives called by the true number of DEs
 
   # FDP
   #-------------------------------------
-  false_pos <- sum(called_de & true_de == 0)
-  # False positives: called_de=TRUE & true_de=0
+  false_pos <- sum(called_de & true_de_vector == 0)
+  # False positives: called_de=TRUE & true_de_vector=0
   total_called <- sum(called_de)
   fdp <- ifelse(total_called == 0, 0, false_pos / total_called)
 
   # AUC
   #-------------------------------------
-  auc <- roc(true_de, results$beta1)$auc
+  auc <- roc(true_de_vector, results$beta1)$auc
 
   list(
     called_de = called_de,
