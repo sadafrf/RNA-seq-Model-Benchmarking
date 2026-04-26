@@ -78,4 +78,47 @@ all_nb_genes <- function(X,Y) {
     )
   }
   do.call(rbind, results)
+  # False Discovery Rate Adjustment for P-values
+  results$FDR_Adj_P<- p.adjust(results$P_Value, method = "BH")
+  return(results)
+}
+
+# ============================================================================
+# FREQUENTIST NEGATIVE BINOMIAL - Evaluation Criteria (same as Frequentist Gaussian)
+# called de, power, FDP, AUC
+# ============================================================================
+evaluate_freq_nb <- function(results, X, true_de) {
+  # DE call
+  #-------------------------------------
+  # CI does not include 0 and p-value is significant
+  called_de <- ((results$ci_upper < 0 | results$ci_lower > 0) & results$FDR_Adj_P < 0.05)
+  # Returns TRUE or FALSE
+
+  # Power
+  # power closed form solution?
+  #-------------------------------------
+  # in order to get the true DE, we need to compare the test results with the original simulated data that has a call for DE or not
+  # de_p is a vector from the simulated data with the calls for DE genes
+  true_de_vector <- true_de[results$Gene_id]
+  power <- sum(called_de & true_de_vector == 1) / sum(true_de_vector == 1)
+  # True positives: called_de=TRUE  & true_de_vector=1
+  # Divide true positives called by the true number of DEs
+
+  # FDP
+  #-------------------------------------
+  false_pos <- sum(called_de & true_de_vector == 0)
+  # False positives: called_de=TRUE & true_de_vector=0
+  total_called <- sum(called_de)
+  fdp <- ifelse(total_called == 0, 0, false_pos / total_called)
+
+  # AUC
+  #-------------------------------------
+  auc <- roc(true_de_vector, results$beta1)$auc
+
+  list(
+    called_de = called_de,
+    power = power,
+    fdp = fdp,
+    auc = auc
+  )
 }
