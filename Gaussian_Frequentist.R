@@ -99,7 +99,7 @@ evaluate_gaussian <- function(results, true_de) {
   # DE call
   #-------------------------------------
   # CI does not include 0 and p-value is significant
-  called_de <- ((results$ci_upper < 0 | results$ci_lower > 0) & results$FDR_Adj_P < 0.05)
+  called_de <- ((results$CI_Upper < 0 | results$CI_Lower > 0) & results$FDR_Adj_P < 0.05)
   # Returns TRUE or FALSE
 
   # Power
