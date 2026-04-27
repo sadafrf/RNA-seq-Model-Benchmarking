@@ -33,7 +33,7 @@ all_nb_genes <- function(X,Y) {
   # -------------------------------------------------------
   for (gene in 1:nrow(Y)) {
     y <- as.numeric(Y[gene, ])
-    fit <- optim(par = init_par, fn = neg_log_likelihood, X = X, y = y, method = "BFGS")
+    fit <- optim(par = init_par, fn = neg_log_likelihood, X = X, Y = y, method = "BFGS")
     #optimization algorithm. It approximates the Hessian (second derivatives) -->
     # uses gradient information (or approximates it) --> updates parameters iteratively
 
@@ -46,7 +46,7 @@ all_nb_genes <- function(X,Y) {
 
     # Hessian (replaces XtX in gaussian)
     # -------------------------------------------------------
-    h <- optimHess(fit$par, neg_loglik, X = X, y = y)
+    h <- optimHess(fit$par, neg_log_likelihood, X = X, y = y)
     # get the variance-covariance matrix
     vcov_mat <- solve(h)
 
@@ -70,14 +70,14 @@ all_nb_genes <- function(X,Y) {
       Gene_id = rownames(Y)[gene],
       beta0 = beta_hat[1],
       beta1 = beta1,
-      SE_beta1 = se1,
+      SE_beta1 = se_beta1,
       CI_Lower = ci_lower,
       CI_Upper = ci_upper,
       T_Statistic = t_stat,
       P_Value = p_val
     )
   }
-  do.call(rbind, results)
+  results <- do.call(rbind, results)
   # False Discovery Rate Adjustment for P-values
   results$FDR_Adj_P<- p.adjust(results$P_Value, method = "BH")
   return(results)
