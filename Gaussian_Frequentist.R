@@ -103,7 +103,6 @@ evaluate_gaussian <- function(results, true_de) {
   # Returns TRUE or FALSE
 
   # Power
-  # power closed form solution?
   #-------------------------------------
   # in order to get the true DE, we need to compare the test results with the original simulated data that has a call for DE or not
   # de_p is a vector from the simulated data with the calls for DE genes
@@ -112,22 +111,27 @@ evaluate_gaussian <- function(results, true_de) {
   # True positives: called_de=TRUE  & true_de_vector=1
   # Divide true positives called by the true number of DEs
 
-  # FDP
+  # FDP and Type I Error
   #-------------------------------------
   false_pos <- sum(called_de & true_de_vector == 0)
   # False positives: called_de=TRUE & true_de_vector=0
+
+  #False discovery proportion: false pos as a proportion of the total called genes
   total_called <- sum(called_de)
   fdp <- ifelse(total_called == 0, 0, false_pos / total_called)
+
+  non_de_genes <- true_de_vector == 0
+  type_i_error <- false_pos/sum(non_de_genes)
 
   # AUC
   #-------------------------------------
   auc <- roc(true_de_vector, results$beta1)$auc
 
   list(
+    Type_I_error = type_i_error,
     called_de = called_de,
     power = power,
     fdp = fdp,
     auc = auc
   )
 }
-
