@@ -1,73 +1,9 @@
+set.seed(42)
+
 library(ggplot2)
 library(dplyr)
 library(tidyr)
-library(rjags)
-library(coda)
-
-
-counts <- matrix(nrow=1000,ncol=100)
-counts <- as.data.frame(counts)
-for (i in (1:nrow(counts))){
-  rownames(counts)[i] <- paste0("Gene", i) 
-}
-
-#Initialize alpha dispersion parameter with gamma prior. This prior is uninformative.
-#The names for the dispersion list are set to be the rownames for the count matrix
-alpha <- rgamma(n=1000, shape=2,rate=0.5)
-names(alpha) <- rownames(counts)
-
-#Initalize bernoulli (1 or 0) if a gene is DE expressed with probability 0.1. 
-#The names of the probability list are set to be the rownames for the count matrix
-de_p <- rbinom(n=1000, size=1, prob=0.1)
-names(de_p) <- rownames(counts)
-
-#Initialize delta as a normal distribution with mean 0 and variance 2
-delta <- rnorm(n=length(rownames(counts[de_p == 1, ])), mean = 1, sd = sqrt(2))
-names(delta) <- rownames(counts[de_p == 1, ])
-
-#Initialize gene average (mu) as a poisson prior with sampling rate = 10 
-mu <- rgamma(n=1000, shape=10, rate=1)
-names(mu) <- rownames(counts)
-
-
-colnames(counts)[1:50] <- "Control"
-colnames(counts)[51:100] <- "Case" 
-
-# Generate count data with error handling
-for (g in 1:nrow(counts)) {
-  gene_name <- rownames(counts)[g]
-  # Generate control samples
-  counts[g, 1:50] <- rnbinom(n = 50, mu = mu[g], size = alpha[g])
-  # Generate case samples
-  if (de_p[g] == 1) {
-    # Differentially expressed gene
-    mu_case <- mu[g] * exp(delta[gene_name])
-    
-    # Check if mu_case is valid (not too large, not NA, not Inf)
-    if (is.finite(mu_case) && mu_case < 1e6) {
-      counts[g, 51:100] <- rnbinom(n = 50, mu = mu_case, size = alpha[g])
-    } else {
-      # If overflow, cap the fold change
-      warning(sprintf("Gene %d: mu_case too large, capping delta", g))
-      delta[gene_name] <- log(1000 / mu[g])  # Cap at 1000x fold change
-      mu_case <- mu[g] * exp(delta[gene_name])
-      counts[g, 51:100] <- rnbinom(n = 50, mu = mu_case, size = alpha[g])
-    }
-  } else {
-    # Not differentially expressed
-    counts[g, 51:100] <- rnbinom(n = 50, mu = mu[g], size = alpha[g])
-  }
-}
-
-print("Data is successfully simulated")
-# Summary of simulated data
-cat("\n=== SIMULATION SUMMARY ===\n")
-cat(sprintf("Total genes: %d\n", nrow(counts)))
-cat(sprintf("DE genes: %d (%.1f%%)\n", sum(de_p), 100 * sum(de_p) / length(de_p)))
-cat(sprintf("Non-DE genes: %d (%.1f%%)\n", sum(de_p == 0), 100 * sum(de_p == 0) / length(de_p)))
-cat(sprintf("Mean count (control): %.2f\n", mean(as.matrix(counts[, 1:50]))))
-cat(sprintf("Mean count (case): %.2f\n", mean(as.matrix(counts[, 51:100]))))
-cat(sprintf("Delta range: [%.2f, %.2f]\n", min(delta), max(delta)))
+library(pROC)
 
 ##Bayesian Inference##
 # Log-likelihood function for Negative Binomial
@@ -231,164 +167,358 @@ analyze_gene <- function(gene_idx, counts_data, n_iter = 10000, burn_in = 2000) 
 }
 
 # ============================================================================
-# RUN ANALYSIS WITH IMPROVED ERROR HANDLING
+# 100-SIMULATION LOOP
 # ============================================================================
 
-cat("Running Metropolis-Hastings...\n")
+n_sims <- 100
+n_genes <- 1000
+all_sim_results <- list()
 
-n_genes_to_analyze <- 1000 # Change to 1000 for all genes
-results_list <- list()
-posterior_summaries <- data.frame()
-failed_genes <- c()
+for (sim in 1:n_sims) {
+  if (sim %% 10 == 0) cat(sprintf("Simulation %d/100\n", sim))
 
-for (g in 1:n_genes_to_analyze) {
-  if (g %% 10 == 0) cat(sprintf("Processing gene %d/%d\n", g, n_genes_to_analyze))
-  
-  result <- tryCatch({
-    analyze_gene(g, counts, n_iter = 5000, burn_in = 1000)
-  }, error = function(e) {
-    cat(sprintf("Error processing gene %d: %s\n", g, e$message))
-    return(NULL)
-  })
-  
-  if (!is.null(result)) {
-    results_list[[g]] <- result
-    posterior_summaries <- rbind(posterior_summaries, result$summary)
-  } else {
-    failed_genes <- c(failed_genes, g)
+  # --- Simulate data ---
+  counts <- matrix(nrow = n_genes, ncol = 100)
+  counts <- as.data.frame(counts)
+  for (i in seq_len(nrow(counts))) {
+    rownames(counts)[i] <- paste0("Gene", i)
   }
-}
+  colnames(counts)[1:50]  <- "Control"
+  colnames(counts)[51:100] <- "Case"
 
-cat(sprintf("\nMetropolis-Hastings complete!\n"))
-cat(sprintf("Successfully analyzed: %d/%d genes\n", 
-            nrow(posterior_summaries), n_genes_to_analyze))
+  alpha <- rgamma(n = n_genes, shape = 2, rate = 0.5)
+  names(alpha) <- rownames(counts)
 
-if (length(failed_genes) > 0) {
-  cat(sprintf("Failed genes: %s\n", paste(failed_genes, collapse = ", ")))
-}
+  de_p <- rbinom(n = n_genes, size = 1, prob = 0.1)
+  names(de_p) <- rownames(counts)
 
-# ============================================================================
-# HYPOTHESIS TESTING: Is δ = 0?
-# ============================================================================
+  delta <- rnorm(n = sum(de_p == 1), mean = 1, sd = sqrt(2))
+  names(delta) <- rownames(counts)[de_p == 1]
 
-if (nrow(posterior_summaries) > 0) {
-  posterior_summaries <- posterior_summaries %>%
-    mutate(
-      # Method 1: Credible interval excludes 0
-      reject_H0_CI = (delta_ci_lower > 0 | delta_ci_upper < 0),
-      
-      # Method 2: Posterior probability that delta is practically zero
-      reject_H0_ROPE = prob_delta_zero < 0.05,
-      
-      # Method 3: Posterior probability delta > 0 is very high or very low
-      reject_H0_prob = (prob_delta_positive > 0.95 | prob_delta_positive < 0.05)
-    )
-  
-  print(posterior_summaries)
-  
-  # ============================================================================
-  # VISUALIZATION FOR FIRST SUCCESSFULLY ANALYZED GENE
-  # ============================================================================
-  
-  # Find first non-NULL result
-  first_valid_idx <- which(!sapply(results_list, is.null))[9]
-  
-  if (!is.na(first_valid_idx) && !is.null(results_list[[first_valid_idx]])) {
-    gene_samples <- results_list[[first_valid_idx]]$samples
-    gene_df <- as.data.frame(gene_samples)
-    gene_name <- posterior_summaries$gene[9]
-    
-    # Trace plot for delta
-    p1 <- ggplot(gene_df, aes(x = 1:nrow(gene_df), y = delta)) +
-      geom_line(alpha = 0.7) +
-      labs(title = sprintf("Trace Plot for δ (%s)", gene_name), 
-           x = "Iteration", y = "δ") +
-      theme_minimal()
-    
-    # Posterior distribution of delta
-    p2 <- ggplot(gene_df, aes(x = delta)) +
-      geom_histogram(aes(y = ..density..), bins = 50, fill = "steelblue", alpha = 0.7) +
-      geom_density(color = "red", size = 1) +
-      geom_vline(xintercept = 0, linetype = "dashed", color = "black", size = 1) +
-      geom_vline(xintercept = mean(gene_df$delta), linetype = "dashed", 
-                 color = "red", size = 0.8) +
-      labs(title = sprintf("Posterior Distribution of δ (%s)", gene_name), 
-           x = "δ", y = "Density") +
-      theme_minimal()
-    
-    # Trace plots for all parameters
-    gene_df_long <- gene_df %>%
-      mutate(iteration = 1:n()) %>%
-      pivot_longer(cols = c(delta, alpha, mu), 
-                   names_to = "parameter", 
-                   values_to = "value")
-    
-    p3 <- ggplot(gene_df_long, aes(x = iteration, y = value)) +
-      geom_line(alpha = 0.7) +
-      facet_wrap(~parameter, scales = "free_y", ncol = 1) +
-      labs(title = sprintf("Trace Plots for All Parameters (%s)", gene_name),
-           x = "Iteration", y = "Value") +
-      theme_minimal()
-    
-    print(p1)
-    print(p2)
-    print(p3)
-  }
-  
-  # Summary of hypothesis tests
-  cat(sprintf("Genes with δ ≠ 0 (CI method): %d/%d\n", 
-              sum(posterior_summaries$reject_H0_CI), 
-              nrow(posterior_summaries)))
-  cat(sprintf("Genes with δ ≠ 0 (ROPE method): %d/%d\n", 
-              sum(posterior_summaries$reject_H0_ROPE), 
-              nrow(posterior_summaries)))
-  
-  # Compare with true DE status
-  if (n_genes_to_analyze <= length(de_p)) {
-    gene_indices <- as.numeric(gsub("Gene", "", posterior_summaries$gene))
-    true_de <- de_p[gene_indices]
-    posterior_summaries$true_DE <- true_de
-    posterior_summaries$true_delta <- ifelse(true_de == 1, 
-                                             delta[names(delta) %in% posterior_summaries$gene],
-                                             0)
-    
-    cat("\n=== COMPARISON WITH TRUE DE STATUS ===\n")
-    confusion_matrix <- table(
-      Predicted = posterior_summaries$reject_H0_CI,
-      True = posterior_summaries$true_DE
-    )
-    print(confusion_matrix)
-    
-    # Calculate accuracy metrics
-    if (sum(confusion_matrix) > 0) {
-      accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
-      cat(sprintf("\nAccuracy: %.2f%%\n", accuracy * 100))
-      
-      # Sensitivity and Specificity
-      if (sum(confusion_matrix[, "1"]) > 0) {
-        sensitivity <- confusion_matrix["TRUE", "1"] / sum(confusion_matrix[, "1"])
-        cat(sprintf("Sensitivity (True Positive Rate): %.2f%%\n", sensitivity * 100))
+  mu <- rgamma(n = n_genes, shape = 10, rate = 1)
+  names(mu) <- rownames(counts)
+
+  for (g in 1:n_genes) {
+    gene_name <- rownames(counts)[g]
+    counts[g, 1:50] <- rnbinom(n = 50, mu = mu[g], size = alpha[g])
+    if (de_p[g] == 1) {
+      mu_case <- mu[g] * exp(delta[gene_name])
+      if (is.finite(mu_case) && mu_case < 1e6) {
+        counts[g, 51:100] <- rnbinom(n = 50, mu = mu_case, size = alpha[g])
+      } else {
+        delta[gene_name] <- log(1000 / mu[g])
+        mu_case <- mu[g] * exp(delta[gene_name])
+        counts[g, 51:100] <- rnbinom(n = 50, mu = mu_case, size = alpha[g])
       }
-      if (sum(confusion_matrix[, "0"]) > 0) {
-        specificity <- confusion_matrix["FALSE", "0"] / sum(confusion_matrix[, "0"])
-        cat(sprintf("Specificity (True Negative Rate): %.2f%%\n", specificity * 100))
+    } else {
+      counts[g, 51:100] <- rnbinom(n = 50, mu = mu[g], size = alpha[g])
+    }
+  }
+
+  # --- Run MH analysis on all genes ---
+  results_list <- list()
+  posterior_summaries <- data.frame()
+
+  for (g in 1:n_genes) {
+    result <- tryCatch({
+      analyze_gene(g, counts, n_iter = 5000, burn_in = 1000)
+    }, error = function(e) NULL)
+
+    if (!is.null(result)) {
+      # Only store MCMC samples for the first 5 genes per simulation
+      if (g <= 5) {
+        results_list[[g]] <- result
+      } else {
+        results_list[[g]] <- list(summary = result$summary, samples = NULL)
+      }
+      posterior_summaries <- rbind(posterior_summaries, result$summary)
+    }
+  }
+
+  # Build true_de and true_delta aligned to posterior_summaries
+  gene_indices <- as.numeric(gsub("Gene", "", posterior_summaries$gene))
+  true_de_vec  <- de_p[gene_indices]
+  true_delta_vec <- ifelse(
+    true_de_vec == 1,
+    delta[posterior_summaries$gene],
+    0
+  )
+  true_delta_vec[is.na(true_delta_vec)] <- 0
+
+  all_sim_results[[sim]] <- list(
+    posterior_summaries = posterior_summaries,
+    true_de             = true_de_vec,
+    true_delta          = true_delta_vec,
+    results_list        = results_list,
+    sim_id              = sim
+  )
+}
+
+cat("All simulations complete.\n")
+
+# ============================================================================
+# POOL RESULTS ACROSS SIMULATIONS
+# ============================================================================
+
+pooled_list <- lapply(seq_along(all_sim_results), function(sim) {
+  res <- all_sim_results[[sim]]
+  df  <- res$posterior_summaries
+  df$true_DE    <- res$true_de
+  df$true_delta <- res$true_delta
+  df$sim_id     <- sim
+  df
+})
+
+pooled_results <- bind_rows(pooled_list)
+
+# Add MLE estimate of delta
+# Raw counts are not retained across simulations; approximate using posterior mu_mean:
+#   mean_control ≈ mu_mean,  mean_case ≈ mu_mean * exp(delta_mean)
+pooled_results <- pooled_results %>%
+  mutate(
+    delta_MLE = log((mu_mean * exp(delta_mean) + 0.5) / (mu_mean + 0.5))
+  )
+
+# Hypothesis testing columns on pooled data
+pooled_results <- pooled_results %>%
+  mutate(
+    reject_H0_CI   = (delta_ci_lower > 0 | delta_ci_upper < 0),
+    reject_H0_ROPE = prob_delta_zero < 0.05,
+    reject_H0_prob = (prob_delta_positive > 0.95 | prob_delta_positive < 0.05)
+  )
+
+# ============================================================================
+# POOLED SUMMARY STATISTICS
+# ============================================================================
+
+roc_pooled <- roc(
+  response  = pooled_results$true_DE,
+  predictor = pooled_results$prob_delta_positive,
+  levels    = c(0, 1),
+  direction = "<",
+  quiet     = TRUE
+)
+mean_auc <- as.numeric(auc(roc_pooled))
+
+sim_aucs <- sapply(seq_len(n_sims), function(s) {
+  sub_df <- pooled_results[pooled_results$sim_id == s, ]
+  if (length(unique(sub_df$true_DE)) < 2) return(NA_real_)
+  as.numeric(auc(roc(sub_df$true_DE, sub_df$prob_delta_positive,
+                     levels = c(0, 1), direction = "<", quiet = TRUE)))
+})
+
+# Per-simulation sensitivity and specificity (CI method)
+sim_sens <- sapply(seq_len(n_sims), function(s) {
+  sub_df <- pooled_results[pooled_results$sim_id == s, ]
+  tp <- sum(sub_df$reject_H0_CI & sub_df$true_DE == 1)
+  fn <- sum(!sub_df$reject_H0_CI & sub_df$true_DE == 1)
+  if ((tp + fn) == 0) NA_real_ else tp / (tp + fn)
+})
+sim_spec <- sapply(seq_len(n_sims), function(s) {
+  sub_df <- pooled_results[pooled_results$sim_id == s, ]
+  tn <- sum(!sub_df$reject_H0_CI & sub_df$true_DE == 0)
+  fp <- sum(sub_df$reject_H0_CI  & sub_df$true_DE == 0)
+  if ((tn + fp) == 0) NA_real_ else tn / (tn + fp)
+})
+
+cat(sprintf("\n=== POOLED RESULTS SUMMARY (%d simulations) ===\n", n_sims))
+cat(sprintf("Total gene-simulation pairs analyzed: %d\n", nrow(pooled_results)))
+cat(sprintf("Mean AUC (prob_delta_positive): %.4f\n", mean(sim_aucs, na.rm = TRUE)))
+cat(sprintf("Mean acceptance rate: %.2f%%\n",
+            mean(pooled_results$acceptance_rate) * 100))
+cat(sprintf("Mean sensitivity: %.2f%%\n", mean(sim_sens, na.rm = TRUE) * 100))
+cat(sprintf("Mean specificity: %.2f%%\n", mean(sim_spec, na.rm = TRUE) * 100))
+
+# ============================================================================
+# VISUALIZATIONS — save to simulation_results.pdf
+# ============================================================================
+
+pdf("simulation_results.pdf", width = 10, height = 8)
+
+# --- A. ROC Curve (pooled) ---
+roc_prob <- roc(pooled_results$true_DE, pooled_results$prob_delta_positive,
+                levels = c(0, 1), direction = "<", quiet = TRUE)
+roc_rope <- roc(pooled_results$true_DE, 1 - pooled_results$prob_delta_zero,
+                levels = c(0, 1), direction = "<", quiet = TRUE)
+roc_mle  <- roc(pooled_results$true_DE, abs(pooled_results$delta_MLE),
+                levels = c(0, 1), direction = "<", quiet = TRUE)
+
+roc_df <- bind_rows(
+  data.frame(FPR = 1 - roc_prob$specificities, TPR = roc_prob$sensitivities,
+             Method = sprintf("P(\u03b4>0), AUC=%.3f", as.numeric(auc(roc_prob)))),
+  data.frame(FPR = 1 - roc_rope$specificities, TPR = roc_rope$sensitivities,
+             Method = sprintf("ROPE, AUC=%.3f", as.numeric(auc(roc_rope)))),
+  data.frame(FPR = 1 - roc_mle$specificities,  TPR = roc_mle$sensitivities,
+             Method = sprintf("MLE, AUC=%.3f",  as.numeric(auc(roc_mle))))
+)
+
+pA <- ggplot(roc_df, aes(x = FPR, y = TPR, color = Method)) +
+  geom_line(linewidth = 1.1) +
+  geom_abline(linetype = "dashed", color = "grey50") +
+  labs(title = "ROC Curve (Pooled Across All Simulations)",
+       x = "False Positive Rate", y = "True Positive Rate",
+       color = "Method") +
+  theme_minimal()
+print(pA)
+
+# --- B. Posterior distribution of delta — DE vs non-DE ---
+pooled_results$de_label <- factor(pooled_results$true_DE,
+                                  levels = c(0, 1),
+                                  labels = c("Non-DE", "DE"))
+
+pB <- ggplot(pooled_results, aes(x = delta_mean, fill = de_label, color = de_label)) +
+  geom_density(alpha = 0.4) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  labs(title = "Pooled Posterior Mean of \u03b4: DE vs Non-DE Genes",
+       x = "Posterior Mean \u03b4", y = "Density",
+       fill = "Gene Type", color = "Gene Type") +
+  theme_minimal()
+print(pB)
+
+# --- C. True delta vs estimated delta (DE genes only) ---
+de_only <- pooled_results %>% filter(true_DE == 1)
+
+pC <- ggplot(de_only, aes(x = true_delta, y = delta_mean, color = factor(sim_id))) +
+  geom_point(alpha = 0.4, size = 0.8) +
+  geom_abline(slope = 1, intercept = 0, linetype = "solid", color = "black") +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  labs(title = "True \u03b4 vs Posterior Mean \u03b4 (DE Genes, Pooled)",
+       x = "True \u03b4", y = "Posterior Mean \u03b4",
+       color = "Simulation") +
+  theme_minimal() +
+  theme(legend.position = "none")
+print(pC)
+
+# --- D. MLE vs Bayesian delta comparison (DE genes only) ---
+cor_val <- cor(de_only$delta_MLE, de_only$delta_mean, use = "complete.obs")
+
+pD <- ggplot(de_only, aes(x = delta_MLE, y = delta_mean)) +
+  geom_point(alpha = 0.3, size = 0.8, color = "steelblue") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black") +
+  annotate("text", x = -Inf, y = Inf, hjust = -0.1, vjust = 1.5,
+           label = sprintf("r = %.3f", cor_val), size = 4) +
+  labs(title = "MLE vs Bayesian Posterior Mean \u03b4",
+       x = "MLE \u03b4", y = "Posterior Mean \u03b4") +
+  theme_minimal()
+print(pD)
+
+# --- E. Acceptance rate distribution ---
+mean_ar <- mean(pooled_results$acceptance_rate)
+
+pE <- ggplot(pooled_results, aes(x = acceptance_rate)) +
+  geom_histogram(bins = 50, fill = "steelblue", color = "white", alpha = 0.8) +
+  geom_vline(xintercept = mean_ar, linetype = "dashed", color = "red", linewidth = 1) +
+  annotate("text", x = mean_ar, y = Inf, vjust = 1.5, hjust = -0.1,
+           label = sprintf("Mean = %.3f", mean_ar), color = "red") +
+  labs(title = "Distribution of MH Acceptance Rates (Pooled)",
+       x = "Acceptance Rate", y = "Count") +
+  theme_minimal()
+print(pE)
+
+# --- F. Trace plots — representative DE gene across simulations ---
+# Only Gene1-Gene5 have MCMC samples stored; find one that is DE in >= 10 sims
+de_gene_counts <- table(
+  pooled_results$gene[pooled_results$true_DE == 1 &
+                        as.numeric(gsub("Gene", "", pooled_results$gene)) <= 5]
+)
+rep_gene_candidates <- names(de_gene_counts)[de_gene_counts >= 10]
+
+trace_plotted <- FALSE
+if (length(rep_gene_candidates) > 0) {
+  rep_gene <- rep_gene_candidates[1]
+  gene_num  <- as.numeric(gsub("Gene", "", rep_gene))
+
+  # Collect trace data from simulations where this gene was DE and has samples
+  trace_list <- list()
+  for (s in seq_len(n_sims)) {
+    if (length(trace_list) >= 9) break
+    res_s <- all_sim_results[[s]]
+    if (is.null(res_s$results_list[[gene_num]])) next
+    if (is.null(res_s$results_list[[gene_num]]$samples)) next
+    samps <- res_s$results_list[[gene_num]]$samples
+    trace_list[[length(trace_list) + 1]] <- data.frame(
+      iteration = seq_len(nrow(samps)),
+      delta     = samps[, "delta"],
+      sim_id    = s
+    )
+  }
+
+  if (length(trace_list) > 0) {
+    trace_df <- bind_rows(trace_list)
+    pF <- ggplot(trace_df, aes(x = iteration, y = delta)) +
+      geom_line(alpha = 0.7, color = "steelblue") +
+      facet_wrap(~sim_id, ncol = 3) +
+      labs(title = sprintf("Trace Plots for \u03b4 \u2014 %s Across Simulations", rep_gene),
+           x = "Iteration", y = "\u03b4") +
+      theme_minimal()
+    print(pF)
+    trace_plotted <- TRUE
+  }
+}
+
+if (!trace_plotted) {
+  # Fallback: trace for first gene with samples across first 9 simulations
+  trace_list <- list()
+  for (s in seq_len(min(9, n_sims))) {
+    res_s <- all_sim_results[[s]]
+    for (gnum in seq_len(5)) {
+      if (!is.null(res_s$results_list[[gnum]]) &&
+          !is.null(res_s$results_list[[gnum]]$samples)) {
+        samps   <- res_s$results_list[[gnum]]$samples
+        gene_nm <- paste0("Gene", gnum)
+        trace_list[[length(trace_list) + 1]] <- data.frame(
+          iteration = seq_len(nrow(samps)),
+          delta     = samps[, "delta"],
+          sim_id    = s,
+          gene      = gene_nm
+        )
+        break
       }
     }
   }
-  
-  # Display acceptance rates
-  cat("\n=== ACCEPTANCE RATE SUMMARY ===\n")
-  cat(sprintf("Mean acceptance rate: %.2f%%\n", 
-              mean(posterior_summaries$acceptance_rate) * 100))
-  cat(sprintf("Min acceptance rate: %.2f%%\n", 
-              min(posterior_summaries$acceptance_rate) * 100))
-  cat(sprintf("Max acceptance rate: %.2f%%\n", 
-              max(posterior_summaries$acceptance_rate) * 100))
-  
-} else {
-  cat("\nNo genes were successfully analyzed. Check warnings for details.\n")
+  if (length(trace_list) > 0) {
+    trace_df <- bind_rows(trace_list)
+    pF <- ggplot(trace_df, aes(x = iteration, y = delta)) +
+      geom_line(alpha = 0.7, color = "steelblue") +
+      facet_wrap(~sim_id, ncol = 3) +
+      labs(title = "Trace Plots for \u03b4 \u2014 Representative Gene Across Simulations",
+           x = "Iteration", y = "\u03b4") +
+      theme_minimal()
+    print(pF)
+  }
 }
 
-# Display warnings
-cat("\n=== WARNINGS ===\n")
-warnings()
+# --- G. Simulation-level AUC distribution ---
+sim_auc_df <- data.frame(sim_id = seq_len(n_sims), auc = sim_aucs)
+mean_sim_auc <- mean(sim_auc_df$auc, na.rm = TRUE)
+
+pG <- ggplot(sim_auc_df, aes(x = auc)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "white", alpha = 0.8) +
+  geom_vline(xintercept = mean_sim_auc, linetype = "dashed", color = "red", linewidth = 1) +
+  annotate("text", x = mean_sim_auc, y = Inf, vjust = 1.5, hjust = -0.1,
+           label = sprintf("Mean = %.3f", mean_sim_auc), color = "red") +
+  labs(title = "Distribution of AUC Across 100 Simulations",
+       x = "AUC", y = "Count") +
+  theme_minimal()
+print(pG)
+
+# --- H. Confusion matrix heatmap (pooled, CI method) ---
+cm_df <- pooled_results %>%
+  mutate(
+    Predicted = ifelse(reject_H0_CI, "Reject H0", "Fail to Reject"),
+    True      = ifelse(true_DE == 1, "DE", "Non-DE")
+  ) %>%
+  count(Predicted, True)
+
+pH <- ggplot(cm_df, aes(x = True, y = Predicted, fill = n)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = n), size = 5) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "Pooled Confusion Matrix (CI Method)",
+       x = "True DE Status", y = "Prediction",
+       fill = "Count") +
+  theme_minimal()
+print(pH)
+
+dev.off()
+cat("Plots saved to simulation_results.pdf\n")
