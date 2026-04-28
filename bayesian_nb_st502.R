@@ -10,7 +10,12 @@ counts <- as.data.frame(counts)
 for (i in (1:nrow(counts))){
   rownames(counts)[i] <- paste0("Gene", i) 
 }
+all_posterior_summaries <- data.frame()   # collects posterior_summaries from every iteration
+all_conv_df             <- data.frame()   # collects conv_df from every iteration
+all_results_list        <- list()         # optional: keeps all per-gene MH samples
+iteration_metadata      <- data.frame()  # tracks simulation-level stats per iteration
 
+for(i in 1:100) {
 #Initialize alpha dispersion parameter with gamma prior. This prior is uninformative.
 #The names for the dispersion list are set to be the rownames for the count matrix
 alpha <- rgamma(n=1000, shape=2,rate=0.5)
@@ -285,6 +290,8 @@ if (nrow(posterior_summaries) > 0) {
     )
   
   print(posterior_summaries)
+  posterior_summaries$iteration <- i
+  all_posterior_summaries <- rbind(all_posterior_summaries, posterior_summaries)
   
   # ============================================================================
   # VISUALIZATION FOR FIRST SUCCESSFULLY ANALYZED GENE
@@ -389,6 +396,14 @@ if (nrow(posterior_summaries) > 0) {
   cat("\nNo genes were successfully analyzed. Check warnings for details.\n")
 }
 
+iteration_metadata <- rbind(iteration_metadata, data.frame(
+  iteration   = i,
+  n_de_genes  = sum(de_p),
+  n_analyzed  = nrow(posterior_summaries),
+  n_failed    = length(failed_genes),
+  mean_accept = mean(posterior_summaries$acceptance_rate)
+))
 # Display warnings
 cat("\n=== WARNINGS ===\n")
 warnings()
+}
