@@ -85,12 +85,7 @@ all_gaussian_genes <- function(X, Y) {
   return(results)
 }
 
-test_results <- all_gaussian_genes(X,Y)
 
-Y_df <- as.data.frame(Y)
-
-Y2 <- Y_df %>%
-  dplyr::select(`04_B73_T_6_R1_S4_clean.ReadsPerGene.out.tab`)
 # ============================================================================
 # FREQUENTIST GAUSSIAN- Evaluation Criteria
 # called de, power, FDP, AUC
