@@ -4,14 +4,15 @@ library(dplyr)
 # Frequentist Negative Binomial Model for ST502 Project
 # ========================================================================================
 # Input (simulated) data is assumed to be in the following form:
-  # Response variable, Y, is a matrix with 100 columns (samples) and 1000 rows (genes)
+  # Response variable, Y, is a matrix with 1000 columns (genes) and 100 rows (samples)
     # there are n subjects and p genes
   # Predictor variables, X, is a matrix with two columns: intercept (all 1) and case/control indicator
     # Intercept gives baseline of 1 to all genes
     # Rows are samples
 
 all_nb_genes <- function(X,Y) {
-
+  Y <- t(Y)
+  stopifnot(all(colnames(Y) == rownames(X)))
   p <- ncol(X)
 
   # Step 1: compute the negative log likelihood
