@@ -87,7 +87,7 @@ all_nb_genes <- function(X,Y) {
 # FREQUENTIST NEGATIVE BINOMIAL - Evaluation Criteria (same as Frequentist Gaussian)
 # called de, power, FDP, AUC
 # ============================================================================
-evaluate_freq_nb <- function(results, X, true_de) {
+evaluate_freq_nb <- function(results, true_de) {
   # DE call
   #-------------------------------------
   # CI does not include 0 and p-value is significant
@@ -104,18 +104,24 @@ evaluate_freq_nb <- function(results, X, true_de) {
   # True positives: called_de=TRUE  & true_de_vector=1
   # Divide true positives called by the true number of DEs
 
-  # FDP
+  # FDP and Type I Error
   #-------------------------------------
   false_pos <- sum(called_de & true_de_vector == 0)
   # False positives: called_de=TRUE & true_de_vector=0
+
+  #False discovery proportion: false pos as a proportion of the total called genes
   total_called <- sum(called_de)
   fdp <- ifelse(total_called == 0, 0, false_pos / total_called)
+
+  non_de_genes <- true_de_vector == 0
+  type_i_error <- false_pos/sum(non_de_genes)
 
   # AUC
   #-------------------------------------
   auc <- roc(true_de_vector, results$beta1)$auc
 
   list(
+    Type_I_error = type_i_error,
     called_de = called_de,
     power = power,
     fdp = fdp,
