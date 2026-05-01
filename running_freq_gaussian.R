@@ -80,7 +80,8 @@ final_freq_gaussian_evals <- dplyr::bind_rows(
 
 # MAKE ROC AND PROC OBJECTS
 # ----------------------------------------------------
-mean_fpr <- seq(0, 1, length.out = 100) #false positive rate
+mean_fpr_gaussian <- seq(0, 1, length.out = 100) #false positive rate
+mean_recall_gaussian <- seq(0, 1, length.out = 100)
 tprs_gaussian <- vector("list", 100) #true positive rate
 prcs_gaussian <- vector("list", 100)
 
@@ -89,22 +90,33 @@ for (i in seq_along(sim_list)) {
 
   true_de <- sim_list[[i]]$params$de_idx
   names(true_de) <- paste0("gene", seq_len(length(true_de)))
-  true_de_vector <- true_de[sim_res$Gene_id]
+  true_de_vector <- true_de[as.character(sim_res$Gene_id)]
+  true_de_vector[is.na(true_de_vector)] <- 0
+  true_de_vector <- as.numeric(true_de_vector)
+
+  # clean p-values
+  pvals <- sim_res$P_Value
+  pvals[is.na(pvals)] <- 1
+  scores <- -log10(pmax(pvals, 1e-300))
+  idx_pos <- which(true_de_vector == 1)
+  idx_neg <- which(true_de_vector == 0)
+  if (length(idx_pos) == 0 || length(idx_neg) == 0) next
 
   # ROC
-  roc_obj <- pROC::roc(true_de_vector, sim_res$beta1, quiet = TRUE)
+  roc_obj <- pROC::roc(true_de_vector, scores, quiet = TRUE)
   tprs_gaussian[[i]] <- approx(1 - roc_obj$specificities, roc_obj$sensitivities,
-                               xout = mean_fpr, rule = 2)$y
+                               xout = mean_fpr_gaussian, rule = 2)$y
   # PRC
   prec_obj <- PRROC::pr.curve(
-    scores.class0 = sim_res$beta1[true_de_vector == 1],
-    scores.class1 = sim_res$beta1[true_de_vector == 0],
+    scores.class0 = scores[idx_pos],
+    scores.class1 = scores[idx_neg],
     curve = TRUE
   )
+
   prcs_gaussian[[i]] <- approx(prec_obj$curve[, 1], prec_obj$curve[, 2],
-                               xout = mean_fpr, rule = 2)$y
+                               xout = mean_recall_gaussian, rule = 2)$y
 }
 
-mean_tpr <- colMeans(do.call(rbind, tprs_gaussian))
-mean_prc <- colMeans(do.call(rbind, prcs_gaussian))
+mean_tpr_gaussian <- colMeans(do.call(rbind, tprs_gaussian))
+mean_prc_gaussian <- colMeans(do.call(rbind, prcs_gaussian))
 
