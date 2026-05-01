@@ -12,13 +12,14 @@ library(pROC)
       # Intercept gives baseline of 1 to all genes
       # Rows are samples
 
-stopifnot(all(rownames(Y) == rownames(X)))
 
 #==========================================================================================
 # FREQUENTIST GAUSSIAN
 #==========================================================================================
 all_gaussian_genes <- function(X, Y) {
+  stopifnot(all(rownames(Y) == rownames(X)))
   Y <- t(Y)
+  stopifnot(all(colnames(Y) == rownames(X)))
   # Updated to divide by library size then multiple by median counts, then log transform
   #--> this more accurately captures RNA seq data variability
   lib_sizes <- colSums(Y) #library sizes (per sample)
@@ -102,31 +103,44 @@ evaluate_gaussian <- function(results, true_de) {
   # in order to get the true DE, we need to compare the test results with the original simulated data that has a call for DE or not
   # de_p is a vector from the simulated data with the calls for DE genes
   true_de_vector <- true_de[results$Gene_id]
-  power <- sum(called_de & true_de_vector == 1) / sum(true_de_vector == 1)
+  #power <- sum(called_de & true_de_vector == 1) / sum(true_de_vector == 1)
   # True positives: called_de=TRUE  & true_de_vector=1
   # Divide true positives called by the true number of DEs
 
-  # FDP and Type I Error
-  #-------------------------------------
-  false_pos <- sum(called_de & true_de_vector == 0)
-  # False positives: called_de=TRUE & true_de_vector=0
+  # at my fixed threshold (FDR < 0.05 + CI):
+  true_pos  <- sum(called_de & true_de_vector == 1)   # same numerator as power
+  false_pos <- sum(called_de & true_de_vector == 0)   # already computed above
+  false_neg <- sum(!called_de & true_de_vector == 1)  # missed DE genes
+  true_neg  <- sum(!called_de & true_de_vector == 0)
 
+  precision <- ifelse((true_pos + false_pos) == 0, 0, true_pos / (true_pos + false_pos))
+  recall    <- true_pos / sum(true_de_vector == 1)     # same as power!!
+  f1        <- ifelse((precision + recall) == 0, 0,
+                      2 * precision * recall / (precision + recall))
+
+  # FDP and Type I Error
   #False discovery proportion: false pos as a proportion of the total called genes
   total_called <- sum(called_de)
   fdp <- ifelse(total_called == 0, 0, false_pos / total_called)
-
   non_de_genes <- true_de_vector == 0
   type_i_error <- false_pos/sum(non_de_genes)
 
   # AUC
   #-------------------------------------
-  auc <- roc(true_de_vector, results$beta1)$auc
+  #auc <- roc(true_de_vector, results$beta1)$auc
 
   list(
     Type_I_error = type_i_error,
-    called_de = called_de,
-    power = power,
-    fdp = fdp,
-    auc = auc
+    called_de    = called_de,
+    #power        = power,          # = recall so I'm removing
+    fdp          = fdp,
+    #auc          = auc,
+    true_pos     = true_pos,
+    false_pos     = false_pos,
+    false_neg = false_neg,
+    true_neg = true_neg,
+    precision    = precision,
+    recall       = recall,         # same as power
+    f1           = f1
   )
 }
