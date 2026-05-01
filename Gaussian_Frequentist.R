@@ -1,7 +1,6 @@
 library(tidyr)
 library(dplyr)
-library(readr)
-library(pROC)
+
 
 # Frequentist Models for ST502 Project
 # ========================================================================================
@@ -94,15 +93,15 @@ all_gaussian_genes <- function(X, Y) {
 evaluate_gaussian <- function(results, true_de) {
   # DE call
   #-------------------------------------
-  # CI does not include 0 and p-value is significant
-  called_de <- ((results$CI_Upper < 0 | results$CI_Lower > 0) & results$FDR_Adj_P < 0.05)
-  # Returns TRUE or FALSE
+  called_de <- results$FDR_Adj_P < 0.05
+  called_de[is.na(called_de)] <- FALSE
 
   # Power
   #-------------------------------------
   # in order to get the true DE, we need to compare the test results with the original simulated data that has a call for DE or not
   # de_p is a vector from the simulated data with the calls for DE genes
-  true_de_vector <- true_de[results$Gene_id]
+  true_de_vector <- true_de[as.character(results$Gene_id)]
+  true_de_vector[is.na(true_de_vector)] <- 0
   #power <- sum(called_de & true_de_vector == 1) / sum(true_de_vector == 1)
   # True positives: called_de=TRUE  & true_de_vector=1
   # Divide true positives called by the true number of DEs
