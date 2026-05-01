@@ -12,10 +12,12 @@ all_posterior_summaries <- data.frame()   # collects posterior_summaries from ev
 all_conv_df <- data.frame()   # collects conv_df from every iteration
 all_results_list <- list()         # optional: keeps all per-gene MH samples
 iteration_metadata <- data.frame()  # tracks simulation-level stats per iteration
+all_results <- data.frame()
+
 
 for(i in 1:100) {
   #Initialize alpha dispersion parameter with gamma prior. This prior is uninformative.
-  #The names for the dispersion list are set to be the rownames for the count matrix
+  #The names for the dispersion lit are set to be the rownames for the count matrix
   alpha <- rgamma(n=1000, shape=2,rate=0.5)
   names(alpha) <- rownames(counts)
   
@@ -189,28 +191,14 @@ for(i in 1:100) {
     ))
   }
   
-  
   analyze_gene <- function(gene_idx, counts_data, n_iter = 10000, burn_in = 2000) {
     y_control <- as.numeric(counts_data[gene_idx, 1:50])
     y_case <- as.numeric(counts_data[gene_idx, 51:100])
-    
-    # Run MH
     mh_results <- metropolis_hastings(y_control, y_case, 
                                       n_iter = n_iter, 
                                       burn_in = burn_in,
                                       proposal_sd = c(0.15, 0.3, 0.5))
     
-    # Check if MH failed or returned NULL
-    if (is.null(mh_results)) {
-      warning(sprintf("MH failed for gene %d", gene_idx))
-      return(NULL)
-    }
-    
-    # Check if samples exist and have sufficient rows
-    if (is.null(mh_results$samples) || nrow(mh_results$samples) == 0) {
-      warning(sprintf("No samples generated for gene %d", gene_idx))
-      return(NULL)
-    }
     
     # Posterior summaries
     posterior_summary <- data.frame(
@@ -227,11 +215,13 @@ for(i in 1:100) {
       prob_delta_zero = mean(abs(mh_results$samples[, "delta"]) < 0.1)  # ROPE
     )
     
+    posterior_summary <- posterior_summary %>% mutate(z = abs(delta_mean / delta_sd))
+    posterior_summary <- posterior_summary[order(posterior_summary$z, decreasing = TRUE), ]
     return(list(
       summary = posterior_summary,
       samples = mh_results$samples
     ))
-  }
+    }
   
   # ============================================================================
   # RUN ANALYSIS WITH IMPROVED ERROR HANDLING
@@ -243,129 +233,93 @@ for(i in 1:100) {
   results_list <- list()
   posterior_summaries <- data.frame()
   failed_genes <- c()
+  thresholds_list <- list()
+  results <- data.frame()
   
   for (g in 1:n_genes_to_analyze) {
     if (g %% 500 == 0) cat(sprintf("Processing gene %d/%d\n", g, n_genes_to_analyze))
-    
-    result <- tryCatch({
-      analyze_gene(g, counts, n_iter = 5000, burn_in = 1000)
-    }, error = function(e) {
-      cat(sprintf("Error processing gene %d: %s\n", g, e$message))
-      return(NULL)
-    })
-    
-    if (!is.null(result)) {
-      results_list[[g]] <- result
-      posterior_summaries <- rbind(posterior_summaries, result$summary)
-    } else {
-      failed_genes <- c(failed_genes, g)
-    }
+    result <- analyze_gene(g, counts, n_iter = 5000, burn_in = 1000)
+    results_list[[g]] <- result
+    posterior_summaries <- rbind(posterior_summaries, result$summary)
   }
   
+  gene_indices <- as.numeric(gsub("Gene", "", posterior_summaries$gene))
+  posterior_summaries$true_DE <- de_p[gene_indices]
+  
+  for (j in 1:nrow(posterior_summaries)) {
+      posterior_summaries$predicted_DE <- FALSE
+      posterior_summaries$predicted_DE[1:j] <- TRUE
+      true <- posterior_summaries$true_DE
+      pred <- posterior_summaries$predicted_DE
+      TP <- sum(pred & true)
+      FP <- sum(pred & !true)
+      TN <- sum(!pred & !true)
+      FN <- sum(!pred & true)
+      precision <- ifelse((TP + FP) > 0, TP / (TP + FP), NA)
+      recall    <- ifelse((TP + FN) > 0, TP / (TP + FN), NA)  # TPR
+      TPR       <- recall
+      FPR       <- ifelse((FP + TN) > 0, FP / (FP + TN), NA)
+      results <- rbind(results, data.frame(
+        threshold_index = j,
+        z_threshold = posterior_summaries$z[j],
+        precision = precision,
+        recall = recall,
+        TPR = TPR,
+        FPR = FPR
+      ))
+  }
   cat(sprintf("\nMetropolis-Hastings complete!\n"))
-  cat(sprintf("Successfully analyzed: %d/%d genes\n", 
-              nrow(posterior_summaries), n_genes_to_analyze))
-  
-  if (length(failed_genes) > 0) {
-    cat(sprintf("Failed genes: %s\n", paste(failed_genes, collapse = ", ")))
-  }
   
   # ============================================================================
   # HYPOTHESIS TESTING: Is δ = 0?
   # ============================================================================
   
-  if (nrow(posterior_summaries) > 0) {
-    posterior_summaries <- posterior_summaries %>%
+  posterior_summaries <- posterior_summaries %>%
       mutate(
-        # Method 1: Credible interval excludes 0
         reject_H0_CI = (delta_ci_lower > 0 | delta_ci_upper < 0),
-        
-        # Method 2: Posterior probability that delta is practically zero
         reject_H0_ROPE = prob_delta_zero < 0.05,
-        
-        # Method 3: Posterior probability delta > 0 is very high or very low
         reject_H0_prob = (prob_delta_positive > 0.95 | prob_delta_positive < 0.05)
       )
-    
-    print(posterior_summaries)
-    posterior_summaries$iteration <- i
-    all_posterior_summaries <- rbind(all_posterior_summaries, posterior_summaries)
+  posterior_summaries$iteration <- i
+  results$iteration <- i
+  all_posterior_summaries <- rbind(all_posterior_summaries, posterior_summaries)
+  all_results <- rbind(all_results, results)
     
     # ============================================================================
     # VISUALIZATION FOR FIRST SUCCESSFULLY ANALYZED GENE
     # ============================================================================
     
     # Find first non-NULL result
-    first_valid_idx <- which(!sapply(results_list, is.null))[9]
-    
-    if (!is.na(first_valid_idx) && !is.null(results_list[[first_valid_idx]])) {
+  first_valid_idx <- which(!sapply(results_list, is.null))[9]
+  if (!is.na(first_valid_idx) && !is.null(results_list[[first_valid_idx]])) {
       gene_samples <- results_list[[first_valid_idx]]$samples
       gene_df <- as.data.frame(gene_samples)
       gene_name <- posterior_summaries$gene[9]
-      
-#      # Trace plot for delta
-#      p1 <- ggplot(gene_df, aes(x = 1:nrow(gene_df), y = delta)) +
-#        geom_line(alpha = 0.7) +
-#        labs(title = sprintf("Trace Plot for δ (%s)", gene_name), 
-#             x = "Iteration", y = "δ") +
-#        theme_minimal()
-#      
-#      # Posterior distribution of delta
-#      p2 <- ggplot(gene_df, aes(x = delta)) +
-#        geom_histogram(aes(y = ..density..), bins = 50, fill = "steelblue", alpha = 0.7) +
-#        geom_density(color = "red", size = 1) +
-#        geom_vline(xintercept = 0, linetype = "dashed", color = "black", size = 1) +
-#        geom_vline(xintercept = mean(gene_df$delta), linetype = "dashed", 
-#                   color = "red", size = 0.8) +
-#        labs(title = sprintf("Posterior Distribution of δ (%s)", gene_name), 
-#             x = "δ", y = "Density") +
-#        theme_minimal()
-#      
-#      # Trace plots for all parameters
-#      gene_df_long <- gene_df %>%
-#        mutate(iteration = 1:n()) %>%
-#        pivot_longer(cols = c(delta, alpha, mu), 
-#                     names_to = "parameter", 
-#                     values_to = "value")
-#      
-#      p3 <- ggplot(gene_df_long, aes(x = iteration, y = value)) +
-#        geom_line(alpha = 0.7) +
-#        facet_wrap(~parameter, scales = "free_y", ncol = 1) +
-#        labs(title = sprintf("Trace Plots for All Parameters (%s)", gene_name),
-#             x = "Iteration", y = "Value") +
-#        theme_minimal()
-#      
-#      print(p1)
-#      print(p2)
-#      print(p3)
-    }
     
     # Summary of hypothesis tests
-    cat(sprintf("Genes with δ ≠ 0 (CI method): %d/%d\n", 
+  cat(sprintf("Genes with δ ≠ 0 (CI method): %d/%d\n", 
                 sum(posterior_summaries$reject_H0_CI), 
                 nrow(posterior_summaries)))
-    cat(sprintf("Genes with δ ≠ 0 (ROPE method): %d/%d\n", 
-                sum(posterior_summaries$reject_H0_ROPE), 
+  cat(sprintf("Genes with δ ≠ 0 (ROPE method): %d/%d\n", 
+              sum(posterior_summaries$reject_H0_ROPE), 
                 nrow(posterior_summaries)))
     
     # Compare with true DE status
-    if (n_genes_to_analyze <= length(de_p)) {
-      gene_indices <- as.numeric(gsub("Gene", "", posterior_summaries$gene))
-      true_de <- de_p[gene_indices]
-      posterior_summaries$true_DE <- true_de
-      posterior_summaries$true_delta <- ifelse(true_de == 1, 
-                                               delta[names(delta) %in% posterior_summaries$gene],
-                                               0)
-      
-      cat("\n=== COMPARISON WITH TRUE DE STATUS ===\n")
-      confusion_matrix <- table(
+  if (n_genes_to_analyze <= length(de_p)) {
+  # Map true delta values onto every gene (0 for non-DE genes)
+    true_delta_vec <- rep(0, nrow(posterior_summaries))
+    names(true_delta_vec) <- posterior_summaries$gene
+    matched <- intersect(names(delta), names(true_delta_vec))
+    true_delta_vec[matched] <- delta[matched]
+    posterior_summaries$true_delta <- ifelse(posterior_summaries$true_DE == 1,true_delta_vec,0)
+    confusion_matrix <- table(
         Predicted = posterior_summaries$reject_H0_CI,
         True = posterior_summaries$true_DE
       )
-      print(confusion_matrix)
+    print(confusion_matrix)
       
       # Calculate accuracy metrics
-      if (sum(confusion_matrix) > 0) {
+    if (sum(confusion_matrix) > 0) {
         accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
         cat(sprintf("\nAccuracy: %.2f%%\n", accuracy * 100))
         
@@ -408,12 +362,13 @@ for(i in 1:100) {
     false_negative = confusion_matrix[1,2],
     false_positive = confusion_matrix[2,1]
   ))
-  # Display warnings
   cat("\n=== WARNINGS ===\n")
   warnings()
 }
 
+
 write.table(iteration_metadata, "iteration_metadata.txt", sep = "\t")
+write.table(all_results, "z_thresholding_for_auc_curve.txt", sep = "\t")
 
 metrics_long <- iteration_metadata %>%
   select(iteration, sensitivity, specificity, accuracy) %>%
@@ -512,4 +467,24 @@ ggplot(dist_df, aes(x = metric, y = value, fill = metric)) +
        y     = "Value") +
   theme_minimal() +
   theme(legend.position = "none")
+  
+
+roc_avg <- all_results %>%
+  group_by(threshold_index) %>%
+  summarise(
+    mean_TPR = mean(TPR, na.rm = TRUE),
+    mean_FPR = mean(FPR, na.rm = TRUE)
+  )
+
+
+ggplot(roc_avg, aes(x = mean_FPR, y = mean_TPR)) +
+  geom_line(size = 1.2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Average ROC Curve (100 Simulations)",
+    x = "False Positive Rate",
+    y = "True Positive Rate"
+  ) +
+  theme_minimal()
+
 dev.off()
