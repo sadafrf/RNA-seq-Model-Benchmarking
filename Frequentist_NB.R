@@ -11,6 +11,7 @@ library(dplyr)
     # Rows are samples
 
 all_nb_genes <- function(X,Y) {
+  stopifnot(all(rownames(Y) == rownames(X)))
   Y <- t(Y)
   stopifnot(all(colnames(Y) == rownames(X)))
   p <- ncol(X)
@@ -47,9 +48,21 @@ all_nb_genes <- function(X,Y) {
 
     # Hessian (replaces XtX in gaussian)
     # -------------------------------------------------------
-    h <- optimHess(fit$par, neg_log_likelihood, X = X, y = y)
-    # get the variance-covariance matrix
+    h <- optimHess(fit$par, neg_log_likelihood, X = X, Y = y)
+
+    if (fit$convergence != 0) {
+      warning(paste("Gene", gene, "did not converge"))
+      next
+    }
+
+    h <- optimHess(fit$par, neg_log_likelihood, X = X, Y = y)
+    if (any(is.nan(h)) || det(h) <= 0) {
+      warning(paste("Gene", gene, "has invalid Hessian"))
+      next
+    }
+
     vcov_mat <- solve(h)
+    # get the variance-covariance matrix
 
     # Get standard errors and test Beta1
     # -------------------------------------------------------
@@ -57,13 +70,14 @@ all_nb_genes <- function(X,Y) {
 
     beta1 <- beta_hat[2]
     se_beta1 <- se_beta[2]
-    t_stat <- beta1 / se_beta1
-    p_val <- 2 * pnorm(-abs(t_stat))
+    z_stat <- beta1 / se_beta1
+    p_val <- 2 * pnorm(-abs(z_stat))
 
     # calculate CIs
     # -------------------------------------------------------
-    ci_lower <- beta1 - 1.96 * se_beta1
-    ci_upper <- beta1 + 1.96 * se_beta1
+    z <- qnorm(0.975)
+    ci_lower <- beta1 - z * se_beta1
+    ci_upper <- beta1 + z * se_beta1
 
     # save results
     # -------------------------------------------------------
@@ -74,7 +88,7 @@ all_nb_genes <- function(X,Y) {
       SE_beta1 = se_beta1,
       CI_Lower = ci_lower,
       CI_Upper = ci_upper,
-      T_Statistic = t_stat,
+      Z_Statistic = z_stat,
       P_Value = p_val
     )
   }
@@ -101,31 +115,43 @@ evaluate_freq_nb <- function(results, true_de) {
   # in order to get the true DE, we need to compare the test results with the original simulated data that has a call for DE or not
   # de_p is a vector from the simulated data with the calls for DE genes
   true_de_vector <- true_de[results$Gene_id]
-  power <- sum(called_de & true_de_vector == 1) / sum(true_de_vector == 1)
+  #power <- sum(called_de & true_de_vector == 1) / sum(true_de_vector == 1)
   # True positives: called_de=TRUE  & true_de_vector=1
   # Divide true positives called by the true number of DEs
 
-  # FDP and Type I Error
-  #-------------------------------------
-  false_pos <- sum(called_de & true_de_vector == 0)
-  # False positives: called_de=TRUE & true_de_vector=0
 
+  # at my fixed threshold (FDR < 0.05 + CI):
+  true_pos  <- sum(called_de & true_de_vector == 1)   # same numerator as power
+  false_pos <- sum(called_de & true_de_vector == 0)   # already computed above
+  false_neg <- sum(!called_de & true_de_vector == 1)  # missed DE genes
+  true_neg  <- sum(!called_de & true_de_vector == 0)
+
+  precision <- ifelse((true_pos + false_pos) == 0, 0, true_pos / (true_pos + false_pos))
+  n_de <- sum(true_de_vector == 1)
+  recall <- ifelse(n_de == 0, NA, true_pos / n_de)
+  f1        <- ifelse((precision + recall) == 0, 0,
+                      2 * precision * recall / (precision + recall))
+
+  # FDP and Type I Error
   #False discovery proportion: false pos as a proportion of the total called genes
   total_called <- sum(called_de)
   fdp <- ifelse(total_called == 0, 0, false_pos / total_called)
-
   non_de_genes <- true_de_vector == 0
-  type_i_error <- false_pos/sum(non_de_genes)
-
-  # AUC
-  #-------------------------------------
-  auc <- roc(true_de_vector, results$beta1)$auc
+  n_null <- sum(non_de_genes)
+  type_i_error <- ifelse(n_null == 0, NA, false_pos / n_null)
 
   list(
     Type_I_error = type_i_error,
-    called_de = called_de,
-    power = power,
-    fdp = fdp,
-    auc = auc
+    called_de    = called_de,
+    #power        = power,          # = recall so I'm removing
+    fdp          = fdp,
+    #auc          = auc,
+    true_pos     = true_pos,
+    false_pos     = false_pos,
+    false_neg = false_neg,
+    true_neg = true_neg,
+    precision    = precision,
+    recall       = recall,         # same as power
+    f1           = f1
   )
 }
