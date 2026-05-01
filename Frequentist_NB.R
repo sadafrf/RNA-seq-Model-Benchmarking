@@ -50,15 +50,15 @@ all_nb_genes <- function(X,Y) {
     # -------------------------------------------------------
     h <- optimHess(fit$par, neg_log_likelihood, X = X, Y = y)
 
-    if (fit$convergence != 0) {
-      warning(paste("Gene", gene, "did not converge"))
+    if (fit$convergence != 0 || any(is.nan(h)) || det(h) <= 0) {
+      results[[gene]] <- data.frame(
+        Gene_id = rownames(Y)[gene],
+        beta0 = NA, beta1 = NA, SE_beta1 = NA,
+        CI_Lower = NA, CI_Upper = NA,
+        Z_Statistic = NA, P_Value = NA
+      )
       next
-    }
 
-    h <- optimHess(fit$par, neg_log_likelihood, X = X, Y = y)
-    if (any(is.nan(h)) || det(h) <= 0) {
-      warning(paste("Gene", gene, "has invalid Hessian"))
-      next
     }
 
     vcov_mat <- solve(h)
@@ -106,7 +106,14 @@ evaluate_freq_nb <- function(results, true_de) {
   # DE call
   #-------------------------------------
   # CI does not include 0 and p-value is significant
-  called_de <- ((results$CI_Upper < 0 | results$CI_Lower > 0) & results$FDR_Adj_P < 0.05)
+  called_de <- rep(FALSE, nrow(results))
+  valid <- complete.cases(results[, c("CI_Upper","CI_Lower","FDR_Adj_P")])
+  called_de[valid] <- (
+    (results$CI_Upper[valid] < 0 | results$CI_Lower[valid] > 0) &
+      results$FDR_Adj_P[valid] < 0.05
+  )
+  #called_de <- ((results$CI_Upper < 0 | results$CI_Lower > 0) & results$FDR_Adj_P < 0.05)
+  #called_de[is.na(called_de)] <- FALSE
   # Returns TRUE or FALSE
 
   # Power
@@ -114,7 +121,9 @@ evaluate_freq_nb <- function(results, true_de) {
   #-------------------------------------
   # in order to get the true DE, we need to compare the test results with the original simulated data that has a call for DE or not
   # de_p is a vector from the simulated data with the calls for DE genes
-  true_de_vector <- true_de[results$Gene_id]
+  #true_de_vector <- true_de[results$Gene_id]
+  true_de_vector <- true_de[as.character(results$Gene_id)]
+  true_de_vector[is.na(true_de_vector)] <- 0
   #power <- sum(called_de & true_de_vector == 1) / sum(true_de_vector == 1)
   # True positives: called_de=TRUE  & true_de_vector=1
   # Divide true positives called by the true number of DEs
