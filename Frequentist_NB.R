@@ -146,15 +146,13 @@ evaluate_freq_nb <- function(results, true_de) {
   list(
     Type_I_error = type_i_error,
     called_de    = called_de,
-    #power        = power,          # = recall so I'm removing
     fdp          = fdp,
-    #auc          = auc,
     true_pos     = true_pos,
     false_pos     = false_pos,
     false_neg = false_neg,
     true_neg = true_neg,
     precision    = precision,
-    recall       = recall,         # same as power
+    recall       = recall,   # same as power
     f1           = f1,
     beta_bias    = bias,
     beta_mse     = mse,
