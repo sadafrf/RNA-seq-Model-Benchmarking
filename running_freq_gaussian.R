@@ -44,6 +44,7 @@ for (i in seq_along(sim_list)) {
 
   # --- Model ---
   res <- all_gaussian_genes(X, Y)
+  res$sim_id <- i
 
   # --- Attach true beta1 ---
   true_beta1 <- sim$params$b1
