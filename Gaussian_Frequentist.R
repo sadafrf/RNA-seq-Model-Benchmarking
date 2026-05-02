@@ -90,21 +90,16 @@ all_gaussian_genes <- function(X, Y) {
 # FREQUENTIST GAUSSIAN- Evaluation Criteria
 # called de, power, FDP, AUC
 # ============================================================================
-evaluate_gaussian <- function(results, true_de) {
+evaluate_freq_gaussian <- function(results, true_de) {
   # DE call
   #-------------------------------------
   called_de <- results$FDR_Adj_P < 0.05
   called_de[is.na(called_de)] <- FALSE
 
-  # Power
-  #-------------------------------------
-  # in order to get the true DE, we need to compare the test results with the original simulated data that has a call for DE or not
-  # de_p is a vector from the simulated data with the calls for DE genes
+  # True DEs
   true_de_vector <- true_de[as.character(results$Gene_id)]
   true_de_vector[is.na(true_de_vector)] <- 0
-  #power <- sum(called_de & true_de_vector == 1) / sum(true_de_vector == 1)
-  # True positives: called_de=TRUE  & true_de_vector=1
-  # Divide true positives called by the true number of DEs
+
 
   # at my fixed threshold (FDR < 0.05 + CI):
   true_pos  <- sum(called_de & true_de_vector == 1)   # same numerator as power
@@ -113,7 +108,8 @@ evaluate_gaussian <- function(results, true_de) {
   true_neg  <- sum(!called_de & true_de_vector == 0)
 
   precision <- ifelse((true_pos + false_pos) == 0, 0, true_pos / (true_pos + false_pos))
-  recall    <- true_pos / sum(true_de_vector == 1)     # same as power!!
+  n_de <- sum(true_de_vector == 1)
+  recall <- ifelse(n_de == 0, NA, true_pos / n_de)
   f1        <- ifelse((precision + recall) == 0, 0,
                       2 * precision * recall / (precision + recall))
 
@@ -122,24 +118,34 @@ evaluate_gaussian <- function(results, true_de) {
   total_called <- sum(called_de)
   fdp <- ifelse(total_called == 0, 0, false_pos / total_called)
   non_de_genes <- true_de_vector == 0
-  type_i_error <- false_pos/sum(non_de_genes)
+  n_null <- sum(non_de_genes)
+  type_i_error <- ifelse(n_null == 0, NA, false_pos / n_null)
 
-  # AUC
-  #-------------------------------------
-  #auc <- roc(true_de_vector, results$beta1)$auc
+  # --- β1 metrics ---
+  df <- results[!is.na(results$beta1) & !is.na(results$true_beta1), ]
+
+  bias   <- mean(df$beta1 - df$true_beta1)
+  mse    <- mean((df$beta1 - df$true_beta1)^2)
+  #corval is the correlation between the estimated B1 and the true B1
+  corval <- cor(df$beta1, df$true_beta1)
+  #coverage is the % of time the true B1 falls in the 95% CI
+  cover  <- mean(df$true_beta1 >= df$CI_Lower &
+                   df$true_beta1 <= df$CI_Upper)
 
   list(
     Type_I_error = type_i_error,
     called_de    = called_de,
-    #power        = power,          # = recall so I'm removing
     fdp          = fdp,
-    #auc          = auc,
     true_pos     = true_pos,
     false_pos     = false_pos,
     false_neg = false_neg,
     true_neg = true_neg,
     precision    = precision,
     recall       = recall,         # same as power
-    f1           = f1
+    f1           = f1,
+    beta_bias    = bias,
+    beta_mse     = mse,
+    beta_cor     = corval,
+    beta_coverage = cover
   )
 }

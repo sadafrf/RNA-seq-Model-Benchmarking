@@ -35,7 +35,6 @@ all_freq_gaussian_evals   <- vector("list", length(sim_list))
 for (i in seq_along(sim_list)) {
   message(i, "/", length(sim_list))
   sim <- sim_list[[i]]
-  X <- X
   Y <- as.matrix(sim$counts)
   mode(Y) <- "numeric"
 
@@ -43,39 +42,45 @@ for (i in seq_along(sim_list)) {
   true_de <- sim$params$de_idx
   names(true_de) <- paste0("gene", seq_len(length(true_de)))
 
-  # MODEL FUNCTION
+  # --- Model ---
   res <- all_gaussian_genes(X, Y)
-  # Add simulation ID
-  res$sim_id <- i
-  all_freq_gaussian_results[[i]] <- res
 
-  # EVALUATION FUNCTION
-  eval_res <- evaluate_gaussian(res, true_de)
-  eval_res$sim_id <- i
-  all_freq_gaussian_evals[[i]] <- eval_res
+  # --- Attach true beta1 ---
+  true_beta1 <- sim$params$b1
+  names(true_beta1) <- paste0("gene", seq_len(length(true_beta1)))
+  res$true_beta1 <- true_beta1[res$Gene_id]
+
+  # --- DE evaluation ---
+  eval_row <- evaluate_freq_gaussian(res, true_de)
+  eval_row$sim_id <- i
+
+  all_freq_gaussian_results[[i]] <- res
+  all_freq_gaussian_evals[[i]]   <- eval_row
 }
 
 # Combine into one big dataframe
 final_freq_gaussian_df <- dplyr::bind_rows(all_freq_gaussian_results)
+final_freq_gaussian_eval_df <- dplyr::bind_rows(all_freq_gaussian_evals)
 
-# Evaluation metrics (one row per simulation)
-final_freq_gaussian_evals <- dplyr::bind_rows(
-  lapply(all_freq_gaussian_evals, function(e) {
-    data.frame(
-      sim_id      = e$sim_id,
-      type_i_error = e$Type_I_error,
-      fdp         = e$fdp,
-      #auc         = e$auc,
-      true_pos    = e$true_pos,
-      false_pos   = e$false_pos,
-      false_neg   = e$false_neg,
-      true_neg    = e$true_neg,
-      precision   = e$precision,
-      recall      = e$recall,
-      f1          = e$f1
-    )
-  })
-)
+
+final_freq_gaussian_evals <- final_freq_gaussian_eval_df %>%
+  group_by(sim_id) %>%
+  summarise(
+    type_i_error = first(Type_I_error),
+    fdp          = first(fdp),
+    true_pos     = first(true_pos),
+    false_pos    = first(false_pos),
+    false_neg    = first(false_neg),
+    true_neg     = first(true_neg),
+    precision    = first(precision),
+    recall       = first(recall),
+    f1           = first(f1),
+    beta_bias    = first(beta_bias),
+    beta_mse     = first(beta_mse),
+    beta_cor     = first(beta_cor),
+    beta_coverage = first(beta_coverage),
+    .groups = "drop"
+  )
 
 
 # MAKE ROC AND PROC OBJECTS
