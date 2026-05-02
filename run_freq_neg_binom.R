@@ -7,36 +7,41 @@ library(PRROC)
 
 # X and Y already loaded from the Frequentist Gaussian run
 
-# I'm gonna try running!
 #------------------------------------------------------------
 all_freq_nb_results <- vector("list", length(sim_list))
 all_freq_nb_evals   <- vector("list", length(sim_list))
 
 for (i in seq_along(sim_list)) {
   message(i, "/", length(sim_list))
+
   sim <- sim_list[[i]]
-  X <- X
   Y <- as.matrix(sim$counts)
   mode(Y) <- "numeric"
 
-  # Name true_de so evaluate_freq_nb can index by gene name
   true_de <- sim$params$de_idx
   names(true_de) <- paste0("gene", seq_len(length(true_de)))
 
-  # MODEL FUNCTION
+  # --- Model ---
   res <- all_nb_genes(X, Y)
-  # Add simulation ID
-  res$sim_id <- i
-  all_freq_nb_results[[i]] <- res
 
-  # EVALUATION FUNCTION
-  eval_res <- evaluate_freq_nb(res, true_de)
-  eval_res$sim_id <- i
-  all_freq_nb_evals[[i]] <- eval_res
+  # --- Attach true beta1 ---
+  true_beta1 <- sim$params$b1
+  names(true_beta1) <- paste0("gene", seq_len(length(true_beta1)))
+  res$true_beta1 <- true_beta1[res$Gene_id]
+
+  # --- DE evaluation ---
+  eval_row <- evaluate_freq_nb(res, true_de)
+  eval_row$sim_id <- i
+
+  all_freq_nb_results[[i]] <- res
+  all_freq_nb_evals[[i]]   <- eval_row
+
 }
 
 # Combine into one big dataframe
 final_freq_nb_df <- dplyr::bind_rows(all_freq_nb_results)
+final_freq_nb_eval_df <- dplyr::bind_rows(all_freq_nb_evals)
+
 
 # Evaluation metrics (one row per simulation)
 final_freq_nb_evals <- dplyr::bind_rows(
@@ -52,10 +57,16 @@ final_freq_nb_evals <- dplyr::bind_rows(
       true_neg    = e$true_neg,
       precision   = e$precision,
       recall      = e$recall,
-      f1          = e$f1
+      f1          = e$f1,
+      beta_bias    = e$bias,
+      beta_mse     = e$mse,
+      beta_cor     = e$corval,
+      beta_coverage = e$cover
     )
   })
 )
+
+
 
 
 # MAKE ROC AND PROC OBJECTS
@@ -64,6 +75,7 @@ mean_fpr_nb <- seq(0, 1, length.out = 100) #false positive rate
 mean_recall_nb <- seq(0, 1, length.out = 100)
 tprs_nb <- vector("list", 100) #true positive rate
 prcs_nb <- vector("list", 100)
+aucs_nb <- numeric(100)
 
 for (i in seq_along(sim_list)) {
   sim_res  <- final_freq_nb_df[final_freq_nb_df$sim_id == i, ]
@@ -85,6 +97,7 @@ for (i in seq_along(sim_list)) {
 
   # ROC
   roc_obj <- pROC::roc(true_de_vector, scores, quiet = TRUE)
+  aucs_nb[i] <- as.numeric(roc_obj$auc)            # add this line
   tprs_nb[[i]] <- approx(1 - roc_obj$specificities, roc_obj$sensitivities,
                                xout = mean_fpr_nb, rule = 2)$y
   # PRC
@@ -104,4 +117,6 @@ for (i in seq_along(sim_list)) {
 
 mean_tpr_nb <- colMeans(do.call(rbind, tprs_nb))
 mean_prc_nb <- colMeans(do.call(rbind, prcs_nb), na.rm = TRUE)
+mean_auc_nb <- mean(aucs_nb)
+sd_auc_nb   <- sd(aucs_nb)
 
