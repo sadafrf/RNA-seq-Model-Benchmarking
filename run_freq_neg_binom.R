@@ -42,29 +42,24 @@ for (i in seq_along(sim_list)) {
 final_freq_nb_df <- dplyr::bind_rows(all_freq_nb_results)
 final_freq_nb_eval_df <- dplyr::bind_rows(all_freq_nb_evals)
 
-
-# Evaluation metrics (one row per simulation)
-final_freq_nb_evals <- dplyr::bind_rows(
-  lapply(all_freq_nb_evals, function(e) {
-    data.frame(
-      sim_id      = e$sim_id,
-      type_i_error = e$Type_I_error,
-      fdp         = e$fdp,
-      #auc         = e$auc,
-      true_pos    = e$true_pos,
-      false_pos   = e$false_pos,
-      false_neg   = e$false_neg,
-      true_neg    = e$true_neg,
-      precision   = e$precision,
-      recall      = e$recall,
-      f1          = e$f1,
-      beta_bias    = e$bias,
-      beta_mse     = e$mse,
-      beta_cor     = e$corval,
-      beta_coverage = e$cover
-    )
-  })
-)
+final_freq_nb_evals <- final_freq_nb_eval_df %>%
+  group_by(sim_id) %>%
+  summarise(
+    type_i_error = first(Type_I_error),
+    fdp          = first(fdp),
+    true_pos     = first(true_pos),
+    false_pos    = first(false_pos),
+    false_neg    = first(false_neg),
+    true_neg     = first(true_neg),
+    precision    = first(precision),
+    recall       = first(recall),
+    f1           = first(f1),
+    beta_bias    = first(beta_bias),
+    beta_mse     = first(beta_mse),
+    beta_cor     = first(beta_cor),
+    beta_coverage = first(beta_coverage),
+    .groups = "drop"
+  )
 
 
 
