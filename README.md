@@ -1,7 +1,6 @@
 # RNA-seq-Model-Benchmarking
 This is the comparison of the frequentist and bayesian approach on RNA-seq data
 
-Here’s a clean, **GitHub README-style summary** of your project—high-level, clear, and not too detailed:
 
 ---
 
