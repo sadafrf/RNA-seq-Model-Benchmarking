@@ -105,31 +105,14 @@ all_nb_genes <- function(X,Y) {
 evaluate_freq_nb <- function(results, true_de) {
   # DE call
   #-------------------------------------
-  # CI does not include 0 and p-value is significant
-  called_de <- rep(FALSE, nrow(results))
-  valid <- complete.cases(results[, c("CI_Upper","CI_Lower","FDR_Adj_P")])
-  called_de[valid] <- (
-    (results$CI_Upper[valid] < 0 | results$CI_Lower[valid] > 0) &
-      results$FDR_Adj_P[valid] < 0.05
-  )
-  #called_de <- ((results$CI_Upper < 0 | results$CI_Lower > 0) & results$FDR_Adj_P < 0.05)
-  #called_de[is.na(called_de)] <- FALSE
-  # Returns TRUE or FALSE
+  called_de <- results$FDR_Adj_P < 0.05
+  called_de[is.na(called_de)] <- FALSE
 
-  # Power
-  # power closed form solution?
-  #-------------------------------------
-  # in order to get the true DE, we need to compare the test results with the original simulated data that has a call for DE or not
-  # de_p is a vector from the simulated data with the calls for DE genes
-  #true_de_vector <- true_de[results$Gene_id]
+  # True DEs
   true_de_vector <- true_de[as.character(results$Gene_id)]
   true_de_vector[is.na(true_de_vector)] <- 0
-  #power <- sum(called_de & true_de_vector == 1) / sum(true_de_vector == 1)
-  # True positives: called_de=TRUE  & true_de_vector=1
-  # Divide true positives called by the true number of DEs
 
-
-  # at my fixed threshold (FDR < 0.05 + CI):
+  # at my fixed threshold (FDR < 0.05):
   true_pos  <- sum(called_de & true_de_vector == 1)   # same numerator as power
   false_pos <- sum(called_de & true_de_vector == 0)   # already computed above
   false_neg <- sum(!called_de & true_de_vector == 1)  # missed DE genes
@@ -149,6 +132,17 @@ evaluate_freq_nb <- function(results, true_de) {
   n_null <- sum(non_de_genes)
   type_i_error <- ifelse(n_null == 0, NA, false_pos / n_null)
 
+  # --- β1 metrics ---
+  df <- results[!is.na(results$beta1) & !is.na(results$true_beta1), ]
+
+  bias   <- mean(df$beta1 - df$true_beta1)
+  mse    <- mean((df$beta1 - df$true_beta1)^2)
+  #corval is the correlation between the estimated B1 and the true B1
+  corval <- cor(df$beta1, df$true_beta1)
+  #coverage is the % of time the true B1 falls in the 95% CI
+  cover  <- mean(df$true_beta1 >= df$CI_Lower &
+                   df$true_beta1 <= df$CI_Upper)
+
   list(
     Type_I_error = type_i_error,
     called_de    = called_de,
@@ -161,6 +155,10 @@ evaluate_freq_nb <- function(results, true_de) {
     true_neg = true_neg,
     precision    = precision,
     recall       = recall,         # same as power
-    f1           = f1
+    f1           = f1,
+    beta_bias    = bias,
+    beta_mse     = mse,
+    beta_cor     = corval,
+    beta_coverage = cover
   )
 }
