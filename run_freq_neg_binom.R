@@ -23,6 +23,7 @@ for (i in seq_along(sim_list)) {
 
   # --- Model ---
   res <- all_nb_genes(X, Y)
+  res$sim_id <- i
 
   # --- Attach true beta1 ---
   true_beta1 <- sim$params$b1
@@ -92,7 +93,7 @@ for (i in seq_along(sim_list)) {
 
   # ROC
   roc_obj <- pROC::roc(true_de_vector, scores, quiet = TRUE)
-  aucs_nb[i] <- as.numeric(roc_obj$auc)            # add this line
+  aucs_nb[i] <- as.numeric(roc_obj$auc)
   tprs_nb[[i]] <- approx(1 - roc_obj$specificities, roc_obj$sensitivities,
                                xout = mean_fpr_nb, rule = 2)$y
   # PRC
