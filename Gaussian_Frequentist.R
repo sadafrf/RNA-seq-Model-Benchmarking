@@ -93,7 +93,7 @@ all_gaussian_genes <- function(X, Y) {
 evaluate_freq_gaussian <- function(results, true_de) {
   # DE call
   #-------------------------------------
-  called_de <- results$FDR_Adj_P < 0.05
+  called_de <- results$P_Value < 0.05
   called_de[is.na(called_de)] <- FALSE
 
   # True DEs
@@ -120,12 +120,20 @@ evaluate_freq_gaussian <- function(results, true_de) {
   non_de_genes <- true_de_vector == 0
   n_null <- sum(non_de_genes)
   type_i_error <- ifelse(n_null == 0, NA, false_pos / n_null)
+  # Type II Error (false negative rate): proportion of true DE genes missed
+  type_ii_error <- ifelse(n_de == 0, NA, false_neg / n_de)
 
   # --- β1 metrics ---
   df <- results[!is.na(results$beta1) & !is.na(results$true_beta1), ]
 
   bias   <- mean(df$beta1 - df$true_beta1)
-  mse    <- mean((df$beta1 - df$true_beta1)^2)
+
+  #needed to change MSE back to fold-change since data was log transformed
+  fc_estimated <- 2^df$beta1
+  fc_true      <- 2^df$true_beta1
+  mse_fc       <- mean((fc_estimated - fc_true)^2)
+  mse_log2    <- mean((df$beta1 - df$true_beta1)^2)
+
   #corval is the correlation between the estimated B1 and the true B1
   corval <- cor(df$beta1, df$true_beta1)
   #coverage is the % of time the true B1 falls in the 95% CI
@@ -134,6 +142,7 @@ evaluate_freq_gaussian <- function(results, true_de) {
 
   list(
     Type_I_error = type_i_error,
+    Type_II_error = type_ii_error,
     called_de    = called_de,
     fdp          = fdp,
     true_pos     = true_pos,
@@ -144,7 +153,8 @@ evaluate_freq_gaussian <- function(results, true_de) {
     recall       = recall,         # same as power
     f1           = f1,
     beta_bias    = bias,
-    beta_mse     = mse,
+    beta_mse_log2   = mse_log2,
+    beta_mse_fc = mse_fc,
     beta_cor     = corval,
     beta_coverage = cover
   )
