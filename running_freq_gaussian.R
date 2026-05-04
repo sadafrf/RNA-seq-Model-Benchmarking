@@ -68,6 +68,7 @@ final_freq_gaussian_evals <- final_freq_gaussian_eval_df %>%
   group_by(sim_id) %>%
   summarise(
     type_i_error = first(Type_I_error),
+    type_ii_error = first(Type_II_error),
     fdp          = first(fdp),
     true_pos     = first(true_pos),
     false_pos    = first(false_pos),
@@ -77,7 +78,8 @@ final_freq_gaussian_evals <- final_freq_gaussian_eval_df %>%
     recall       = first(recall),
     f1           = first(f1),
     beta_bias    = first(beta_bias),
-    beta_mse     = first(beta_mse),
+    beta_mse_log2     = first(beta_mse_log2),
+    beta_mse_fc     = first(beta_mse_fc),
     beta_cor     = first(beta_cor),
     beta_coverage = first(beta_coverage),
     .groups = "drop"
