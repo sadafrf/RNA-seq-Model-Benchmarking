@@ -245,6 +245,7 @@ for(i in 1:100) {
   
   gene_indices <- as.numeric(gsub("Gene", "", posterior_summaries$gene))
   posterior_summaries$true_DE <- de_p[gene_indices]
+  posterior_summaries <- posterior_summaries[sort(posterior_summaries$z, decreasing = T), ]
   
   for (j in 1:nrow(posterior_summaries)) {
       posterior_summaries$predicted_DE <- FALSE
@@ -295,7 +296,7 @@ for(i in 1:100) {
       gene_samples <- results_list[[first_valid_idx]]$samples
       gene_df <- as.data.frame(gene_samples)
       gene_name <- posterior_summaries$gene[9]
-    
+    }
     # Summary of hypothesis tests
   cat(sprintf("Genes with δ ≠ 0 (CI method): %d/%d\n", 
                 sum(posterior_summaries$reject_H0_CI), 
@@ -312,58 +313,77 @@ for(i in 1:100) {
     matched <- intersect(names(delta), names(true_delta_vec))
     true_delta_vec[matched] <- delta[matched]
     posterior_summaries$true_delta <- ifelse(posterior_summaries$true_DE == 1,true_delta_vec,0)
+    cat("\n=== PREDICTION SUMMARY ===\n")
+    cat(sprintf("Total genes: %d\n", nrow(posterior_summaries)))
+    cat(sprintf("Predicted DE (TRUE): %d\n", sum(posterior_summaries$reject_H0_CI)))
+    cat(sprintf("Predicted non-DE (FALSE): %d\n", sum(!posterior_summaries$reject_H0_CI)))
+    cat(sprintf("True DE genes: %d\n", sum(posterior_summaries$true_DE)))
+    cat(sprintf("True non-DE genes: %d\n", sum(posterior_summaries$true_DE == 0)))
     confusion_matrix <- table(
         Predicted = posterior_summaries$reject_H0_CI,
         True = posterior_summaries$true_DE
       )
     print(confusion_matrix)
-      
-      # Calculate accuracy metrics
-    if (sum(confusion_matrix) > 0) {
-        accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
-        cat(sprintf("\nAccuracy: %.2f%%\n", accuracy * 100))
-        
-        # Sensitivity and Specificity
-        if (sum(confusion_matrix[, "1"]) > 0) {
-          sensitivity <- confusion_matrix["TRUE", "1"] / sum(confusion_matrix[, "1"])
-          cat(sprintf("Sensitivity (True Positive Rate): %.2f%%\n", sensitivity * 100))
-        }
-        if (sum(confusion_matrix[, "0"]) > 0) {
-          specificity <- confusion_matrix["FALSE", "0"] / sum(confusion_matrix[, "0"])
-          cat(sprintf("Specificity (True Negative Rate): %.2f%%\n", specificity * 100))
-        }
-      }
+    get_cm_value <- function(cm, row, col) {
+    if (row %in% rownames(cm) && col %in% colnames(cm)) {
+      return(cm[row, col])
+    } else {
+      return(0)
     }
-    # Display acceptance rates
-    cat("\n=== ACCEPTANCE RATE SUMMARY ===\n")
-    cat(sprintf("Mean acceptance rate: %.2f%%\n", 
-                mean(posterior_summaries$acceptance_rate) * 100))
-    cat(sprintf("Min acceptance rate: %.2f%%\n", 
-                min(posterior_summaries$acceptance_rate) * 100))
-    cat(sprintf("Max acceptance rate: %.2f%%\n", 
-                max(posterior_summaries$acceptance_rate) * 100))
-    
-  } else {
-    cat("\nNo genes were successfully analyzed. Check warnings for details.\n")
   }
   
-  iteration_metadata <- rbind(iteration_metadata, data.frame(
-    iteration   = i,
-    n_de_genes  = sum(de_p),
-    n_analyzed  = nrow(posterior_summaries),
-    n_failed    = length(failed_genes),
-    mean_accept = mean(posterior_summaries$acceptance_rate),
-    sensitivity = confusion_matrix["TRUE", "1"] / sum(confusion_matrix[, "1"]),
-    specificity = confusion_matrix["FALSE", "0"] / sum(confusion_matrix[, "0"]),
-    accuracy = sum(diag(confusion_matrix)) / sum(confusion_matrix),
-    acceptance_rate = posterior_summaries$acceptance_rate,
-    true_negative = confusion_matrix[1,1],
-    true_positive = confusion_matrix[2,2],
-    false_negative = confusion_matrix[1,2],
-    false_positive = confusion_matrix[2,1]
-  ))
-  cat("\n=== WARNINGS ===\n")
-  warnings()
+  # Extract values safely
+    TP <- get_cm_value(confusion_matrix, "TRUE", "1")
+    TN <- get_cm_value(confusion_matrix, "FALSE", "0")
+    FP <- get_cm_value(confusion_matrix, "TRUE", "0")
+    FN <- get_cm_value(confusion_matrix, "FALSE", "1")
+  
+  # Calculate metrics with safe denominators
+    if (sum(confusion_matrix) > 0) {
+      accuracy <- (TP + TN) / sum(confusion_matrix)
+      cat(sprintf("\nAccuracy: %.2f%%\n", accuracy * 100))
+      
+      # Sensitivity (TPR)
+      if ((TP + FN) > 0) {
+        sensitivity <- TP / (TP + FN)
+        cat(sprintf("Sensitivity (True Positive Rate): %.2f%%\n", sensitivity * 100))
+      } else {
+        sensitivity <- NA
+        cat("Sensitivity: N/A (no true positives or false negatives)\n")
+      }
+      
+      # Specificity (TNR)
+      if ((TN + FP) > 0) {
+        specificity <- TN / (TN + FP)
+        cat(sprintf("Specificity (True Negative Rate): %.2f%%\n", specificity * 100))
+      } else {
+        specificity <- NA
+        cat("Specificity: N/A (no true negatives or false positives)\n")
+      }
+    } else {
+      accuracy <- NA
+      sensitivity <- NA
+      specificity <- NA
+    }
+    
+    iteration_metadata <- rbind(iteration_metadata, data.frame(
+      iteration   = i,
+      n_de_genes  = sum(de_p),
+      n_analyzed  = nrow(posterior_summaries),
+      n_failed    = length(failed_genes),
+      mean_accept = mean(posterior_summaries$acceptance_rate),
+      sensitivity = TP / (TP + FN),
+      specificity = TN / (TN+FP),
+      accuracy = sum(diag(confusion_matrix)) / sum(confusion_matrix),
+      acceptance_rate = posterior_summaries$acceptance_rate,
+      true_negative = confusion_matrix[1,1],
+      true_positive = confusion_matrix[2,2],
+      false_negative = confusion_matrix[1,2],
+      false_positive = confusion_matrix[2,1]
+    ))
+    cat("\n=== WARNINGS ===\n")
+    warnings()
+  }
 }
 
 
@@ -468,14 +488,12 @@ ggplot(dist_df, aes(x = metric, y = value, fill = metric)) +
   theme_minimal() +
   theme(legend.position = "none")
   
-
 roc_avg <- all_results %>%
   group_by(threshold_index) %>%
   summarise(
     mean_TPR = mean(TPR, na.rm = TRUE),
     mean_FPR = mean(FPR, na.rm = TRUE)
   )
-
 
 ggplot(roc_avg, aes(x = mean_FPR, y = mean_TPR)) +
   geom_line(size = 1.2) +
