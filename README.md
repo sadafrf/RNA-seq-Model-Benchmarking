@@ -121,7 +121,7 @@ The aim is to better understand *which models are reliable for detecting true bi
 
 ## Contributors
 
-- Jonathan Caradonna — Bayesian Negative Binomial (Metropolis)
+- Jonathan Caradonna — Bayesian Negative Binomial (Metropolis), Bayesian Negative Binomial
 - Sadaf Raoufi — Bayesian Gaussian, Bayesian Negative Binomial
 - Kate Everly — Frequentist Gaussian, Frequentist Negative Binomial
 - Dan Gingerich — Bayesian Gaussian, Bayesian Negative Binomial (INLA)
