@@ -19,8 +19,7 @@ A one-page summary of the methodology, simulation setup, and benchmarking result
 ```
 bayesian/      Bayesian models
   bayesian_gaussian.R                   Conjugate Bayesian Gaussian (per gene)
-  bayesian_negative_binomial_inla_1.R   NB via INLA / Laplace approximation (variant 1)
-  bayesian_negative_binomial_inla_2.R   NB via INLA / Laplace approximation (variant 2)
+  bayesian_negative_binomial_inla_2.R   NB via INLA / Laplace approximation
   bayesian_negative_binomial_metropolis.R   NB via Metropolis-Hastings MCMC sampler
 
 frequentist/   Frequentist models and evaluation
