@@ -15,4 +15,4 @@ A one-page summary of the project, simulation framework, model comparison, and b
 
 If you reference this work, please cite the project repository:
 
-> Caradonna J., Everly K., Ginger D., Raoufi S. *Modeling RNA-seq Count Data: A Simulation Study of Frequentist and Bayesian Approaches.* NC State University, Department of Statistics.
+> Caradonna J., Everly K., Gingerich D., Raoufi S. *Modeling RNA-seq Count Data: A Simulation Study of Frequentist and Bayesian Approaches.* NC State University, Department of Statistics.

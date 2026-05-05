@@ -125,4 +125,4 @@ The aim is to better understand *which models are reliable for detecting true bi
 - Jonathan Caradonna — Bayesian Negative Binomial (Metropolis)
 - Sadaf Raoufi — Bayesian Gaussian, Bayesian Negative Binomial
 - Kate Everly — Frequentist Gaussian, Frequentist Negative Binomial
-- Dan Ginger — Bayesian Gaussian, Bayesian Negative Binomial (INLA)
+- Dan Gingerich — Bayesian Gaussian, Bayesian Negative Binomial (INLA)
