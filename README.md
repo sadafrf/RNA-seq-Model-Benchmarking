@@ -35,10 +35,9 @@ We simulate such data and test how well different models recover true biological
 * Counts generated using the **Negative Binomial distribution** (realistic for RNA-seq)
 * 10% of genes are truly **differentially expressed (ground truth)** 
 
-### 2. Two Simulation Settings
+### 2. Simulation Settings
 
-* **Independent genes**: standard assumption in many models
-* **Dependent genes**: using a **Gaussian copula** to introduce realistic correlation structure 
+* **Independent genes**: this is the standard assumption in many models
 
 ### 3. Model Comparison
 
@@ -70,14 +69,11 @@ We evaluate models based on:
 
 ## Motivation
 
-Many RNA-seq pipelines rely on simplifying assumptions such as:
-
-* Gaussian approximations
-* Independence between genes
+Many RNA-seq pipelines rely on simplifying assumptions such as Gaussian approximations
 
 This project explores:
 How much these assumptions affect real conclusions
- Whether more realistic modeling (e.g., NB + dependency) improves inference
+ Whether more realistic modeling (e.g., NB) improves inference
 
 ---
 
@@ -100,5 +96,4 @@ This project bridges:
 Ultimately, we aim to better understand:
 
 *Which models are reliable for detecting true biological signals in RNA-seq data*
-
 
