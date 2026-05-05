@@ -4,6 +4,16 @@ A simulation study comparing **frequentist** and **Bayesian** statistical models
 
 ---
 
+## Poster
+
+A one-page summary of the methodology, simulation setup, and benchmarking results — presented at the NC State University Department of Statistics.
+
+[![Project poster: Modeling RNA-seq Count Data — A Simulation Study of Frequentist and Bayesian Approaches](poster/poster.png)](poster/poster.pdf)
+
+📄 [Download the full-resolution PDF](poster/poster.pdf)
+
+---
+
 ## Repository Structure
 
 ```
@@ -11,6 +21,7 @@ bayesian/      Bayesian models
   bayesian_gaussian.R                   Conjugate Bayesian Gaussian (per gene)
   bayesian_negative_binomial_inla_1.R   NB via INLA / Laplace approximation (variant 1)
   bayesian_negative_binomial_inla_2.R   NB via INLA / Laplace approximation (variant 2)
+  bayesian_negative_binomial_metropolis.R   NB via Metropolis-Hastings MCMC sampler
 
 frequentist/   Frequentist models and evaluation
   Gaussian_Frequentist.R                Per-gene Gaussian GLM
